@@ -108,9 +108,9 @@ too_many_lines = "allow"
 similar_names = "allow"
 
 [profile.dev]
-debug = 1
+debug = 0
 incremental = false
 
 [profile.test]
-debug = 1
+debug = 0
 incremental = false

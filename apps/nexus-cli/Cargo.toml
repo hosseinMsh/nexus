@@ -19,8 +19,17 @@ nexus-proxy = { workspace = true }
 nexus-storage = { workspace = true }
 nexus-events = { workspace = true }
 nexus-telemetry = { workspace = true }
+nexus-download = { workspace = true }
+nexus-automation = { workspace = true }
+nexus-path-scheduler = { workspace = true }
+nexus-protocols = { workspace = true }
+nexus-transport = { workspace = true }
+nexus-ipc = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 url = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

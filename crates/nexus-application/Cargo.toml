@@ -14,12 +14,22 @@ nexus-proxy = { workspace = true }
 nexus-storage = { workspace = true }
 nexus-recovery = { workspace = true }
 nexus-events = { workspace = true }
+nexus-path-scheduler = { workspace = true }
+nexus-protocols = { workspace = true }
+nexus-automation = { workspace = true }
+nexus-security = { workspace = true }
+nexus-ipc = { workspace = true }
+nexus-transport = { workspace = true }
+tokio-util = { workspace = true }
 chrono = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 nexus-network-platform = { workspace = true }
+tempfile = "3.17"

@@ -21,6 +21,12 @@ impl RuleId {
     }
 }
 
+impl std::fmt::Display for RuleId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Matching conditions for triggering an automation rule.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct RuleConditions {
@@ -126,21 +132,30 @@ pub struct AppliedRuleResult {
 }
 
 /// Evaluator and repository of automation rules.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct RuleEngine {
-    rules: Vec<AutomationRule>,
+    rules: std::sync::RwLock<Vec<AutomationRule>>,
 }
 
 impl RuleEngine {
     #[must_use]
     pub fn new() -> Self {
-        Self { rules: Vec::new() }
+        Self {
+            rules: std::sync::RwLock::new(Vec::new()),
+        }
     }
 
     /// Adds a new automation rule, keeping the list sorted by priority descending.
-    pub fn add_rule(&mut self, rule: AutomationRule) {
-        self.rules.push(rule);
-        self.rules.sort_by_key(|a| std::cmp::Reverse(a.priority));
+    pub fn add_rule(&self, rule: AutomationRule) {
+        let mut rules = self.rules.write().unwrap();
+        rules.push(rule);
+        rules.sort_by_key(|a| std::cmp::Reverse(a.priority));
+    }
+
+    /// Lists all registered automation rules.
+    #[must_use]
+    pub fn list_rules(&self) -> Vec<AutomationRule> {
+        self.rules.read().unwrap().clone()
     }
 
     /// Evaluates a candidate against all active rules and returns the combined or first matching action.
@@ -152,8 +167,9 @@ impl RuleEngine {
         size: Option<u64>,
     ) -> AppliedRuleResult {
         let mut result = AppliedRuleResult::default();
+        let rules = self.rules.read().unwrap();
 
-        for rule in self.rules.iter().filter(|r| r.enabled) {
+        for rule in rules.iter().filter(|r| r.enabled) {
             if rule.conditions.matches(url, filename, size) {
                 if result.matched_rule_id.is_none() {
                     result.matched_rule_id = Some(rule.id);
@@ -186,7 +202,7 @@ mod tests {
 
     #[test]
     fn test_rule_matching_extensions_and_domain() {
-        let mut engine = RuleEngine::new();
+        let engine = RuleEngine::new();
 
         let iso_rule = AutomationRule {
             id: RuleId::new(),

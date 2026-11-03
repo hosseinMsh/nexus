@@ -50,6 +50,10 @@ path = "integration/protocol_adapters_test.rs"
 name = "automation_engine"
 path = "integration/automation_engine_test.rs"
 
+[[test]]
+name = "applications"
+path = "integration/applications_test.rs"
+
 [dependencies]
 nexus-core = { workspace = true }
 nexus-domain = { workspace = true }

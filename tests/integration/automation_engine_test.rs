@@ -21,7 +21,7 @@ use url::Url;
 
 #[test]
 fn test_automation_rules_evaluation_and_policy_override() {
-    let mut engine = RuleEngine::new();
+    let engine = RuleEngine::new();
 
     // Rule 1: Operating Systems (High priority: 100)
     let os_rule = AutomationRule {

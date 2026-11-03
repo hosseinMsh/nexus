@@ -136,6 +136,11 @@ impl RpcDispatcher {
         }
     }
 
+    #[must_use]
+    pub fn session_token(&self) -> &str {
+        &self.session_token
+    }
+
     /// Authenticates and executes an incoming JSON-RPC 2.0 request.
     pub async fn dispatch(
         &self,

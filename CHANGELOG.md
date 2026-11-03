@@ -7,7 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] - Phase 9: Desktop & CLI Applications
+## [Unreleased] - Phase 10: Hardening & Release 1.0
+
+## [0.10.0] - Phase 9: Desktop & CLI Applications
+
+### Added
+- **Central Application Service Facade (`nexus-application::NexusEngine`):**
+  - Unified orchestration wiring `DownloadEngine`, `NetworkManager`, `ProxyManager`, `ProtocolManager`, `QueueManager`, `RuleEngine`, `AdaptivePathScheduler`, and `EventBus`.
+  - Asynchronous transfer initiation with multi-path routing, priority queuing, and live cancellation token tracking (`active_cancellations`).
+  - Aggregated performance statistics computation (`EngineStats`) tracking total throughput, active connections, and transferred bytes.
+  - JSON-RPC 2.0 `RpcHandler` implementation providing API methods for task management (`tasks.add`, `tasks.start`, `tasks.pause`, `tasks.resume`, `tasks.cancel`, `tasks.list`, `tasks.get`), network monitoring, proxy inspection, and queue control.
+- **NEXUS Command-Line Interface (`apps/nexus-cli`):**
+  - Subcommands: `download` (add, start, list, inspect, pause, resume, cancel), `network` (interfaces, paths, add-path), `proxy` (list, add), `queue` (status, set-limit), `rules`, `stats`, and `info`.
+  - Headless JSON-RPC daemon service (`nexus daemon`) with TCP socket listener and Bearer session authentication.
+  - Direct JSON-RPC client interface (`nexus rpc`) for automated script control.
+- **NEXUS Native Desktop Application Shell (`apps/nexus-desktop`):**
+  - Reactive `DesktopState` and `DesktopViewModel` supporting full PRD Section 4.8 views: `Dashboard`, `Downloads`, `NetworkMonitor`, `ProxyManager`, `Queue`, `Scheduler`, `Settings`, and `Logs`.
+  - Asynchronous `DesktopController` decoupled via `EventBus` message channel.
+  - Native terminal/window presentation renderer with visual transfer progress, interface link status, and real-time throughput metrics.
+- **Integration Test Suite (`nexus-tests`):**
+  - `applications_test.rs`: Integration tests validating CLI orchestration, real TCP socket JSON-RPC daemon roundtrips, authenticated dispatch, and desktop reactive event synchronization.
 
 ## [0.9.0] - Phase 8: Automation Engine
 
