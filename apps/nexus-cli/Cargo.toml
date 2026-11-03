@@ -1,0 +1,26 @@
+[package]
+name = "nexus-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "nexus"
+path = "src/main.rs"
+
+[dependencies]
+nexus-core = { workspace = true }
+nexus-domain = { workspace = true }
+nexus-application = { workspace = true }
+nexus-network = { workspace = true }
+nexus-network-platform = { workspace = true }
+nexus-proxy = { workspace = true }
+nexus-storage = { workspace = true }
+nexus-events = { workspace = true }
+nexus-telemetry = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+url = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }

@@ -1,0 +1,3 @@
+avoid-breaking-exported-api = false
+cognitive-complexity-threshold = 25
+doc-valid-idents = ["NEXUS", "SQLite", "HTTP", "HTTPS", "SOCKS4", "SOCKS5", "JSON-RPC", "MPTCP"]

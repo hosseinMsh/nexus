@@ -1,0 +1,15 @@
+[package]
+name = "nexus-network"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+nexus-core = { workspace = true }
+nexus-domain = { workspace = true }
+nexus-network-platform = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

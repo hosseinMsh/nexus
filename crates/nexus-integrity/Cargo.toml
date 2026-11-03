@@ -1,0 +1,14 @@
+[package]
+name = "nexus-integrity"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+nexus-core = { workspace = true }
+sha2 = { workspace = true }
+blake3 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }

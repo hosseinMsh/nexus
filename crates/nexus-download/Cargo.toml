@@ -1,0 +1,16 @@
+[package]
+name = "nexus-download"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+nexus-core = { workspace = true }
+nexus-domain = { workspace = true }
+nexus-segments = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }

@@ -1,0 +1,101 @@
+[workspace]
+resolver = "2"
+members = [
+    "apps/nexus-desktop",
+    "apps/nexus-cli",
+    "crates/nexus-core",
+    "crates/nexus-domain",
+    "crates/nexus-application",
+    "crates/nexus-download",
+    "crates/nexus-segments",
+    "crates/nexus-network",
+    "crates/nexus-network-platform",
+    "crates/nexus-proxy",
+    "crates/nexus-path-scheduler",
+    "crates/nexus-transport",
+    "crates/nexus-protocols",
+    "crates/nexus-storage",
+    "crates/nexus-recovery",
+    "crates/nexus-integrity",
+    "crates/nexus-security",
+    "crates/nexus-automation",
+    "crates/nexus-ipc",
+    "crates/nexus-events",
+    "crates/nexus-telemetry",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT"
+authors = ["NEXUS Contributors"]
+repository = "https://github.com/nexus-transfer/nexus"
+homepage = "https://nexus-transfer.github.io"
+readme = "README.md"
+
+[workspace.dependencies]
+# Internal workspace crates
+nexus-core = { path = "crates/nexus-core" }
+nexus-domain = { path = "crates/nexus-domain" }
+nexus-application = { path = "crates/nexus-application" }
+nexus-download = { path = "crates/nexus-download" }
+nexus-segments = { path = "crates/nexus-segments" }
+nexus-network = { path = "crates/nexus-network" }
+nexus-network-platform = { path = "crates/nexus-network-platform" }
+nexus-proxy = { path = "crates/nexus-proxy" }
+nexus-path-scheduler = { path = "crates/nexus-path-scheduler" }
+nexus-transport = { path = "crates/nexus-transport" }
+nexus-protocols = { path = "crates/nexus-protocols" }
+nexus-storage = { path = "crates/nexus-storage" }
+nexus-recovery = { path = "crates/nexus-recovery" }
+nexus-integrity = { path = "crates/nexus-integrity" }
+nexus-security = { path = "crates/nexus-security" }
+nexus-automation = { path = "crates/nexus-automation" }
+nexus-ipc = { path = "crates/nexus-ipc" }
+nexus-events = { path = "crates/nexus-events" }
+nexus-telemetry = { path = "crates/nexus-telemetry" }
+
+# Async & Runtime
+tokio = { version = "1.43", features = ["full"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# Serialization & Deserialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error Handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Logging & Telemetry
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+
+# CLI & Configuration
+clap = { version = "4.5", features = ["derive", "env"] }
+
+# Network & HTTP
+url = { version = "2.5", features = ["serde"] }
+
+# Identifiers & Time
+uuid = { version = "1.11", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Cryptography & Integrity
+sha2 = "0.10"
+blake3 = "1.5"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+module_name_repetitions = "allow"
+too_many_lines = "allow"
+similar_names = "allow"
