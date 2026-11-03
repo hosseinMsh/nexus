@@ -7,7 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] - Phase 7: Protocol Extensions
+## [Unreleased] - Phase 8: Automation Engine
+
+## [0.8.0] - Phase 7: Protocol Extensions
+
+### Added
+- **Protocol Dispatcher & Manager (`nexus-protocols::manager`):**
+  - Implemented `ProtocolManager` with thread-safe adapter registry (`register_adapter`, `get_adapter`).
+  - Dynamic scheme-based transfer dispatching for metadata probing and byte-range streaming.
+- **HTTP / HTTPS Protocol Adapter (`nexus-protocols::http`):**
+  - Implemented `HttpProtocolAdapter` bridging `HttpTransportClient` to the unified `ProtocolAdapter` trait.
+- **FTP / FTPS Protocol Adapter (`nexus-protocols::ftp`):**
+  - RFC 959 session handling with USER/PASS authentication and binary transfer mode (`TYPE I`).
+  - Implemented remote file size querying via `SIZE` command (RFC 3659).
+  - Extended Passive (`EPSV`, RFC 2428) and Passive (`PASV`) data port negotiation.
+  - Implemented Range resumption using `REST <offset>` and `RETR <path>`.
+- **BitTorrent & Magnet Protocol Suite (`nexus-protocols::torrent`):**
+  - Full Bencode encoder and decoder (BEP 3) supporting integers (`i...e`), byte strings (`len:str`), lists (`l...e`), and sorted dictionaries (`d...e`).
+  - Implemented `MagnetUri` parser (BEP 9) extracting `urn:btih` infohash, display name (`dn`), trackers (`tr`), web seeds (`ws`), and exact length (`xl`).
+  - Implemented `MagnetProtocolAdapter` with metadata probing and web-seed bridging.
+- **Metalink 4.0 & 3.0 Document Parser (`nexus-protocols::metalink`):**
+  - Implemented `MetalinkParser` extracting `<file>` definitions, cryptographic verification hashes (`sha-256`, `sha-1`, `md5`), and multiple mirror URLs with location and priority ranking.
+  - Automatic mirror sorting preferring lowest numerical priority values.
+- **WebDAV Protocol Adapter (`nexus-protocols::webdav`):**
+  - WebDAV (RFC 4918) URL mapping (`webdav://` and `webdavs://`).
+  - Implemented `parse_propfind_xml` extracting `getcontentlength`, `getlastmodified`, `getetag`, and `is_collection` flags.
+- **Integration Test Suite (`nexus-tests`):**
+  - `protocol_adapters_test.rs`: 5 integration tests covering:
+    - ProtocolManager routing across HTTP, FTP, Magnet, and WebDAV with unsupported scheme rejection.
+    - FTP metadata probing (`SIZE`) and range streaming (`REST`) against a live hermetic mock FTP server.
+    - Bencode serialization/deserialization and Magnet URI parsing.
+    - Metalink multi-mirror priority ordering and hash extraction.
+    - WebDAV metadata extraction and range downloading.
 
 ## [0.7.0] - Phase 6: Multi-Path Networking
 
