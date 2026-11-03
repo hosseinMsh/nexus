@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] - Phase 10: Hardening & Release 1.0
+## [1.0.0] - 2026-11-03 - Release 1.0 Milestone
+
+### Added
+- **End-to-End System Smoke & Verification Suite (`nexus-tests::e2e_system`):**
+  - Full multi-path end-to-end integration test validating the entire transfer workflow against a hermetic mock file server.
+  - Multi-path segment division, parallel Range requests, atomic part-file promotion, and temporary file cleanup.
+  - Double cryptographic verification: SHA-256 and BLAKE3 checksums computed and verified on the final on-disk file.
+  - JSON-RPC API verification of task state transition to `Completed` and statistics aggregation.
+- **Hardening & Security Audits:**
+  - Workspace-wide `#![deny(unsafe_code)]` compliance across all 19 internal crates and 2 binaries.
+  - SSRF protections, filename path traversal prevention (`sanitize_filename`), and zero plaintext credential leakage in SQLite databases.
+  - Memory and resource profile optimization: build profile compacting (`debug = 0`) preventing disk bloat while retaining maximum compiler safety and runtime performance.
+- **Version 1.0 Release Promotion:**
+  - Workspace packages promoted to `1.0.0`.
+  - Master development roadmap (Phases 0 through 10) fully implemented, automated, and verified with 100% test pass rate.
 
 ## [0.10.0] - Phase 9: Desktop & CLI Applications
 

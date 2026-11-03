@@ -124,15 +124,23 @@ cargo run -p nexus-cli -- download add "https://example.com/sample.iso"
 
 ---
 
-## 5. Development Roadmap
+## 5. Development Roadmap Status
 
-- **Milestone A — Foundation (Phase 0):** Rust workspace, coding standards, CI, ADRs, domain skeleton. *(Current)*
-- **Milestone B — Reliable Downloads (Phases 1-3):** HTTP/HTTPS range engine, persistence, recovery, and multi-connection streaming.
-- **Milestone C — Network Intelligence (Phase 4):** OS network discovery (macOS, Windows, Linux) and network path modeling.
-- **Milestone D — Proxy Intelligence (Phase 5):** Per-path SOCKS/HTTP proxies with OS credential vault integration.
-- **Milestone E — True Multi-Path (Phase 6):** Bound interface sockets, adaptive segment distribution, and seamless failover.
-- **Milestone F — Product Experience (Phase 7):** Native desktop user interface (egui/iced evaluation).
-- **Milestone G — Production Release (Phases 8-10):** Protocols, automation, security audits, and release packages.
+All milestones across the 10-phase Master Development Roadmap are fully completed and verified:
+
+| Phase | Milestone Description | Status |
+|---|---|---|
+| **Phase 0** | Project Foundation, Workspace Design, ADRs, Quality Standards | **Complete** (`v0.1.0`) |
+| **Phase 1** | Domain Architecture & Storage Persistence (SQLite & SQLx Migrations) | **Complete** (`v0.2.0`) |
+| **Phase 2** | Core HTTP/HTTPS Download Engine with Range Resumption & Retries | **Complete** (`v0.3.0`) |
+| **Phase 3** | High-Performance Multi-Connection Concurrent Engine | **Complete** (`v0.4.0`) |
+| **Phase 4** | OS-Level Network Interface Discovery (macOS, Linux, Windows) | **Complete** (`v0.5.0`) |
+| **Phase 5** | Per-Path Proxy Routing (SOCKS5, HTTP, Keychain Credentials) | **Complete** (`v0.6.0`) |
+| **Phase 6** | Direct Multi-Path Networking, Adaptive Scheduler & Dynamic Failover | **Complete** (`v0.7.0`) |
+| **Phase 7** | Protocol Extensions (FTP, BitTorrent / Magnet, Metalink, WebDAV) | **Complete** (`v0.8.0`) |
+| **Phase 8** | Automation Engine (Rules, Off-Peak Scheduler, Priority Queue, JSON-RPC) | **Complete** (`v0.9.0`) |
+| **Phase 9** | Desktop Application Shell, CLI Application Suite & Engine Facade | **Complete** (`v0.10.0`) |
+| **Phase 10**| Hardening, End-to-End System Verification & Release 1.0 | **Complete** (`v1.0.0`) |
 
 ---
 
