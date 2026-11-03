@@ -113,6 +113,57 @@ pub fn validate_auth_token(auth_header: Option<&str>, session_token: &str) -> Re
     }
 }
 
+/// Asynchronous RPC handler callback interface.
+#[async_trait::async_trait]
+pub trait RpcHandler: Send + Sync {
+    async fn handle(&self, method: &str, params: Option<Value>) -> Result<Value, JsonRpcError>;
+}
+
+/// Dispatches validated JSON-RPC requests to the application RPC handler.
+pub struct RpcDispatcher {
+    session_token: String,
+    handler: std::sync::Arc<dyn RpcHandler>,
+}
+
+pub type JsonRpcDispatcher = RpcDispatcher;
+
+impl RpcDispatcher {
+    #[must_use]
+    pub fn new(session_token: String, handler: std::sync::Arc<dyn RpcHandler>) -> Self {
+        Self {
+            session_token,
+            handler,
+        }
+    }
+
+    /// Authenticates and executes an incoming JSON-RPC 2.0 request.
+    pub async fn dispatch(
+        &self,
+        auth_header: Option<&str>,
+        request: JsonRpcRequest,
+    ) -> JsonRpcResponse {
+        if request.jsonrpc != "2.0" {
+            return JsonRpcResponse::error(
+                request.id,
+                JsonRpcError {
+                    code: JsonRpcError::INVALID_REQUEST,
+                    message: format!("Expected jsonrpc '2.0', got '{}'", request.jsonrpc),
+                    data: None,
+                },
+            );
+        }
+
+        if validate_auth_token(auth_header, &self.session_token).is_err() {
+            return JsonRpcResponse::error(request.id, JsonRpcError::unauthorized());
+        }
+
+        match self.handler.handle(&request.method, request.params).await {
+            Ok(result) => JsonRpcResponse::success(request.id, result),
+            Err(err) => JsonRpcResponse::error(request.id, err),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -7,7 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] - Phase 8: Automation Engine
+## [Unreleased] - Phase 9: Desktop & CLI Applications
+
+## [0.9.0] - Phase 8: Automation Engine
+
+### Added
+- **Automation Rule Engine (`nexus-automation::rules`):**
+  - Declarative rule matching based on URL pattern regex/substrings, domain whitelist, compound file extensions (e.g. `.tar.gz`, `.iso`, `.zip`), and min/max file size thresholds.
+  - Priority-based rule execution (`sort_by_key`) with actions applying custom destination directories, category assignment, connection limits, and per-download bandwidth throttles.
+- **Off-Peak Scheduler & Time Windows (`nexus-automation::scheduler`):**
+  - Implemented `TimeWindow` with support for standard daytime windows and overnight midnight-spanning off-peak windows (e.g., 23:00 to 07:00).
+  - Configurable `SchedulePolicy` with speed throttling, deferral until next off-peak window, and maximum concurrency control.
+- **Priority Concurrency Queue Manager (`nexus-automation::queue`):**
+  - Multi-state queue management (`Pending`, `Active`, `Paused`, `Completed`, `Failed`).
+  - Strict priority scheduling (`P0` Urgent through `P3` Low) with automatic task promotion up to maximum active concurrency slots.
+- **Clipboard URL Extractor (`nexus-automation::clipboard`):**
+  - Heuristic detection and extraction of URLs (`http`, `https`, `ftp`, `magnet`, `webdav`) from clipboard contents.
+  - Automatic trailing punctuation sanitization (periods, commas, closing brackets) preserving query parameters.
+- **JSON-RPC 2.0 Dispatcher (`nexus-ipc`):**
+  - Spec-compliant JSON-RPC 2.0 protocol engine (`JsonRpcRequest`, `JsonRpcResponse`, `JsonRpcError`).
+  - Thread-safe Bearer session token authentication guard (`check_auth`).
+  - Modular `RpcHandler` trait for seamless integration with frontend, CLI, and browser extensions.
+- **Integration Test Suite (`nexus-tests`):**
+  - `automation_engine_test.rs`: 5 tests validating rule evaluation, overnight scheduling, clipboard parsing, priority concurrency queuing, and authenticated JSON-RPC dispatching.
 
 ## [0.8.0] - Phase 7: Protocol Extensions
 
