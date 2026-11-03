@@ -30,6 +30,10 @@ path = "integration/multi_connection_engine_test.rs"
 name = "multi_connection_benchmark"
 path = "performance/multi_connection_benchmark_test.rs"
 
+[[test]]
+name = "network_discovery"
+path = "network/network_discovery_test.rs"
+
 [dependencies]
 nexus-core = { workspace = true }
 nexus-domain = { workspace = true }

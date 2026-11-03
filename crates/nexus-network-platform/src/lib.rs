@@ -1,9 +1,32 @@
-//! Cross-platform network interface enumeration and socket binding abstraction.
+//! Cross-platform network interface enumeration, status inspection, and socket binding abstraction.
 
 use async_trait::async_trait;
 use nexus_domain::{InterfaceId, InterfaceType, NetworkInterface};
 use std::net::IpAddr;
 use thiserror::Error;
+use uuid::Uuid;
+
+pub mod linux;
+pub mod macos;
+pub mod simulated;
+pub mod windows;
+
+pub use linux::LinuxNetworkPlatform;
+pub use macos::MacOsNetworkPlatform;
+pub use simulated::SimulatedNetworkPlatform;
+pub use windows::WindowsNetworkPlatform;
+
+#[cfg(target_os = "macos")]
+pub type NativeNetworkPlatform = macos::MacOsNetworkPlatform;
+
+#[cfg(target_os = "linux")]
+pub type NativeNetworkPlatform = linux::LinuxNetworkPlatform;
+
+#[cfg(target_os = "windows")]
+pub type NativeNetworkPlatform = windows::WindowsNetworkPlatform;
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+pub type NativeNetworkPlatform = SystemNetworkPlatform;
 
 #[derive(Error, Debug)]
 pub enum NetworkPlatformError {
@@ -28,6 +51,14 @@ pub struct InterfaceStatus {
     pub ip_addresses: Vec<IpAddr>,
 }
 
+/// Generates a deterministic, reproducible `InterfaceId` from platform prefix and system name.
+#[must_use]
+pub fn deterministic_interface_id(platform_prefix: &str, system_name: &str) -> InterfaceId {
+    let namespace = Uuid::from_u128(0x4e455855535f4e4554574f524b000000); // "NEXUS_NETWORK"
+    let name = format!("{platform_prefix}:{system_name}");
+    InterfaceId::from_uuid(Uuid::new_v5(&namespace, name.as_bytes()))
+}
+
 /// Abstract contract for operating system network interface discovery and binding.
 #[async_trait]
 pub trait NetworkPlatform: Send + Sync {
@@ -48,22 +79,20 @@ pub trait NetworkPlatform: Send + Sync {
     ) -> Result<(), NetworkPlatformError>;
 }
 
-/// Default/fallback implementation providing local discovery.
+/// Fallback platform implementation.
 #[derive(Debug, Default)]
 pub struct SystemNetworkPlatform;
 
 #[async_trait]
 impl NetworkPlatform for SystemNetworkPlatform {
     fn list_interfaces(&self) -> Result<Vec<NetworkInterface>, NetworkPlatformError> {
-        // Fallback discovery: standard loopback and placeholder interfaces.
-        // Platform-specific crates (macos, windows, linux) implement native discovery in Phase 4.
         let mut interfaces = Vec::new();
 
-        let lo0_uuid = uuid::Uuid::from_u128(1);
-        let en0_uuid = uuid::Uuid::from_u128(2);
+        let lo0_id = deterministic_interface_id("system", "lo0");
+        let en0_id = deterministic_interface_id("system", "en0");
 
         interfaces.push(NetworkInterface {
-            id: InterfaceId::from_uuid(lo0_uuid),
+            id: lo0_id,
             system_name: "lo0".to_string(),
             display_name: "Loopback Interface".to_string(),
             interface_type: InterfaceType::Loopback,
@@ -74,10 +103,10 @@ impl NetworkPlatform for SystemNetworkPlatform {
         });
 
         interfaces.push(NetworkInterface {
-            id: InterfaceId::from_uuid(en0_uuid),
+            id: en0_id,
             system_name: "en0".to_string(),
-            display_name: "Primary Wi-Fi".to_string(),
-            interface_type: InterfaceType::Wifi,
+            display_name: "Primary Network Adapter".to_string(),
+            interface_type: InterfaceType::Ethernet,
             ip_addresses: vec!["192.168.1.100".parse().unwrap()],
             is_up: true,
             is_default_route: true,
@@ -109,7 +138,6 @@ impl NetworkPlatform for SystemNetworkPlatform {
         _interface: &NetworkInterface,
         _socket_fd: std::os::raw::c_int,
     ) -> Result<(), NetworkPlatformError> {
-        // Mock / placeholder socket binding
         Ok(())
     }
 }
@@ -125,6 +153,15 @@ mod tests {
         assert!(!ifaces.is_empty());
         assert!(ifaces
             .iter()
-            .any(|i| i.interface_type == InterfaceType::Wifi));
+            .any(|i| i.interface_type == InterfaceType::Ethernet));
+    }
+
+    #[test]
+    fn test_deterministic_id_reproducibility() {
+        let id1 = deterministic_interface_id("macos", "en0");
+        let id2 = deterministic_interface_id("macos", "en0");
+        let id3 = deterministic_interface_id("macos", "en1");
+        assert_eq!(id1, id2);
+        assert_ne!(id1, id3);
     }
 }

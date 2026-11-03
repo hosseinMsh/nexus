@@ -7,7 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] - Phase 3: Multi-Connection Engine
+## [Unreleased] - Phase 4: Network Discovery
+
+### Added
+- **OS Platform Adapters (`nexus-network-platform`):**
+  - **macOS (`MacOsNetworkPlatform`):** Native hardware port discovery (`networksetup -listallhardwareports`), `ifconfig` flags/status/address parsing, and active default gateway route detection (`route -n get default`).
+  - **Linux (`LinuxNetworkPlatform`):** Direct sysfs inspection (`/sys/class/net/*`), operstate/carrier reading, USB tethering driver identification (`rndis_host`, `cdc_ncm`, `cdc_ether`, `ipheth`), and `/proc/net/route` gateway parsing.
+  - **Windows (`WindowsNetworkPlatform`):** Net adapter classification (802.11 Wi-Fi, GbE Ethernet, Remote NDIS / Apple Mobile Device USB tethering).
+  - **Simulated Platform (`SimulatedNetworkPlatform`):** Hermetic testing platform for simulated connect/disconnect, tethering attach/detach, and sleep/wake state machines.
+  - **Deterministic Interface IDs:** Generated reproducible UUIDv5 identifiers from platform prefix and system name, ensuring stable identities across reboots and scans.
+- **Dynamic Network Monitoring (`nexus-network::monitor`):**
+  - Implemented `NetworkMonitor` with broadcast stream delivering `NetworkChangeEvent`s:
+    - `InterfaceDiscovered`, `InterfaceRemoved`, `InterfaceStatusChanged`, `DefaultRouteChanged`, `SleepDetected`, `WakeDetected`.
+  - Distinguishes whether an interface is physically present, operational (`is_up`), and connected (`has_carrier` with IP).
+- **Network Path Health Auditing (`nexus-network`):**
+  - Implemented `inspect_path_health` reporting live path availability, carrier status, and IP addresses.
+  - Added `remove_path` and `get_path` management methods to `NetworkManager`.
+- **Integration Test Suite (`nexus-tests`):**
+  - `network_discovery_test.rs`: 5 integration tests verifying:
+    - Wi-Fi, Ethernet, Loopback, and live macOS interface enumeration.
+    - USB tethering detection, dynamic classification, and path binding.
+    - Interface disconnection and automatic recovery reflection.
+    - System sleep and wake detection.
+    - Download resilience: in-flight transfers survive mid-stream network drops and resume seamlessly.
+
+## [0.4.0] - Phase 3: Multi-Connection Engine
 
 ### Added
 - **Asynchronous Disk Writer Actor (`nexus-download::writer`):**

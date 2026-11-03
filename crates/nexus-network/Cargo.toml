@@ -12,4 +12,5 @@ nexus-network-platform = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 tracing = { workspace = true }

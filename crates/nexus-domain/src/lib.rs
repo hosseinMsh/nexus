@@ -217,8 +217,29 @@ pub enum InterfaceType {
     Wifi,
     Ethernet,
     Cellular,
+    UsbTethering,
     Loopback,
     Other,
+}
+
+impl InterfaceType {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Wifi => "Wi-Fi",
+            Self::Ethernet => "Ethernet",
+            Self::Cellular => "Cellular",
+            Self::UsbTethering => "USB Tethering",
+            Self::Loopback => "Loopback",
+            Self::Other => "Other",
+        }
+    }
+}
+
+impl fmt::Display for InterfaceType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
 }
 
 /// Physical or logical network interface detected on the host OS.

@@ -87,7 +87,7 @@ bytes = "1.10"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "chrono", "uuid", "migrate"] }
 
 # Identifiers & Time
-uuid = { version = "1.11", features = ["v4", "serde"] }
+uuid = { version = "1.11", features = ["v4", "v5", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 
 # Cryptography & Integrity
@@ -106,3 +106,11 @@ missing_errors_doc = "allow"
 module_name_repetitions = "allow"
 too_many_lines = "allow"
 similar_names = "allow"
+
+[profile.dev]
+debug = 1
+incremental = false
+
+[profile.test]
+debug = 1
+incremental = false

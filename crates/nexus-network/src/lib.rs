@@ -1,12 +1,17 @@
-//! High-level network interface discovery and NetworkPath management.
+//! High-level network interface discovery, NetworkPath management, and health auditing.
 
 use nexus_domain::{InterfaceId, InterfaceType, NetworkInterface, NetworkPath, PathId, PathLimits};
 use nexus_network_platform::{NetworkPlatform, NetworkPlatformError};
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
 use tracing::info;
+
+pub mod monitor;
+
+pub use monitor::{NetworkChangeEvent, NetworkMonitor};
 
 #[derive(Error, Debug)]
 pub enum NetworkError {
@@ -23,7 +28,18 @@ pub enum NetworkError {
     PathAlreadyExists(String),
 }
 
-/// Coordinates network interfaces and configured network paths.
+/// Dynamic health, operational status, and reachability details of a configured NetworkPath.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathHealth {
+    pub path_id: PathId,
+    pub interface_id: InterfaceId,
+    pub is_available: bool,
+    pub is_up: bool,
+    pub has_carrier: bool,
+    pub ip_addresses: Vec<IpAddr>,
+}
+
+/// Coordinates network interfaces, path configurations, and live monitoring.
 #[derive(Clone)]
 pub struct NetworkManager {
     platform: Arc<dyn NetworkPlatform>,
@@ -44,7 +60,7 @@ impl NetworkManager {
         Ok(self.platform.list_interfaces()?)
     }
 
-    /// Returns interfaces filtered by specific type (e.g. Wifi or Ethernet).
+    /// Returns interfaces filtered by specific type (e.g. Wifi, Ethernet, UsbTethering).
     pub fn filter_interfaces_by_type(
         &self,
         kind: InterfaceType,
@@ -95,6 +111,26 @@ impl NetworkManager {
         self.paths.read().await.values().cloned().collect()
     }
 
+    /// Retrieves a specific network path by ID.
+    pub async fn get_path(&self, path_id: &PathId) -> Result<NetworkPath, NetworkError> {
+        self.paths
+            .read()
+            .await
+            .get(path_id)
+            .cloned()
+            .ok_or_else(|| NetworkError::PathNotFound(path_id.to_string()))
+    }
+
+    /// Deletes a configured network path.
+    pub async fn remove_path(&self, path_id: &PathId) -> Result<(), NetworkError> {
+        let mut paths = self.paths.write().await;
+        paths
+            .remove(path_id)
+            .ok_or_else(|| NetworkError::PathNotFound(path_id.to_string()))?;
+        info!(path_id = %path_id, "Removed NetworkPath");
+        Ok(())
+    }
+
     /// Toggles the enabled state of a network path.
     pub async fn set_path_enabled(
         &self,
@@ -109,17 +145,42 @@ impl NetworkManager {
         info!(path_id = %path_id, enabled = enabled, "Updated path enabled status");
         Ok(())
     }
+
+    /// Inspects the live health, operational state, and IP connectivity of a NetworkPath.
+    pub async fn inspect_path_health(&self, path_id: &PathId) -> Result<PathHealth, NetworkError> {
+        let path = self.get_path(path_id).await?;
+
+        match self.platform.inspect_interface(&path.interface_id).await {
+            Ok(status) => Ok(PathHealth {
+                path_id: *path_id,
+                interface_id: path.interface_id,
+                is_available: path.enabled && status.is_up && status.has_carrier,
+                is_up: status.is_up,
+                has_carrier: status.has_carrier,
+                ip_addresses: status.ip_addresses,
+            }),
+            Err(NetworkPlatformError::InterfaceNotFound(_)) => Ok(PathHealth {
+                path_id: *path_id,
+                interface_id: path.interface_id,
+                is_available: false,
+                is_up: false,
+                has_carrier: false,
+                ip_addresses: Vec::new(),
+            }),
+            Err(e) => Err(NetworkError::Platform(e)),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_network_platform::SystemNetworkPlatform;
+    use nexus_network_platform::SimulatedNetworkPlatform;
 
     #[tokio::test]
-    async fn test_create_and_list_network_path() {
-        let platform = Arc::new(SystemNetworkPlatform);
-        let manager = NetworkManager::new(platform);
+    async fn test_create_and_inspect_path_health() {
+        let platform = Arc::new(SimulatedNetworkPlatform::new());
+        let manager = NetworkManager::new(platform.clone());
 
         let ifaces = manager.list_interfaces().unwrap();
         let wifi = ifaces
@@ -135,8 +196,21 @@ mod tests {
         assert_eq!(path.name, "fast-wifi");
         assert!(path.enabled);
 
-        let all_paths = manager.list_paths().await;
-        assert_eq!(all_paths.len(), 1);
-        assert_eq!(all_paths[0].id, path.id);
+        // Path is healthy initially
+        let health = manager.inspect_path_health(&path.id).await.unwrap();
+        assert!(health.is_available);
+        assert!(health.is_up);
+        assert!(health.has_carrier);
+
+        // Disconnect interface
+        platform.set_interface_up(&wifi.id, false);
+        let health_after_down = manager.inspect_path_health(&path.id).await.unwrap();
+        assert!(!health_after_down.is_available);
+        assert!(!health_after_down.is_up);
+
+        // Reconnect
+        platform.set_interface_up(&wifi.id, true);
+        let health_restored = manager.inspect_path_health(&path.id).await.unwrap();
+        assert!(health_restored.is_available);
     }
 }
