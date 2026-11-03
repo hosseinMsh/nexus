@@ -22,6 +22,7 @@ members = [
     "crates/nexus-ipc",
     "crates/nexus-events",
     "crates/nexus-telemetry",
+    "tests",
 ]
 
 [workspace.package]
@@ -78,6 +79,9 @@ clap = { version = "4.5", features = ["derive", "env"] }
 
 # Network & HTTP
 url = { version = "2.5", features = ["serde"] }
+
+# Database & Persistence
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "chrono", "uuid", "migrate"] }
 
 # Identifiers & Time
 uuid = { version = "1.11", features = ["v4", "serde"] }

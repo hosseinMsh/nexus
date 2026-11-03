@@ -7,7 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] - Phase 0: Project Foundation
+## [Unreleased] - Phase 1: Domain and Storage Persistence
+
+### Added
+- **SQLite Storage Engine (`nexus-storage`):**
+  - Integrated `sqlx 0.8` with embedded migrations (`migrations/0001_initial_schema.sql`).
+  - Implemented `SqliteStorage` connection pool with automatic WAL mode (`PRAGMA journal_mode = WAL`), foreign keys enforcement (`PRAGMA foreign_keys = ON`), and normal synchronous durability.
+  - Implemented `TaskRepository`, `SegmentRepository`, `PathRepository`, and `ProxyRepository` for SQLite.
+  - Implemented `InMemoryStorage` mock repository with full feature parity.
+- **Relational Schema:**
+  - `downloads` table with full policy serialization, progress bytes, and status indices.
+  - `segments` table with foreign key cascade to downloads and non-overlapping byte intervals.
+  - `network_paths` table with priority, interface reference, and bandwidth constraints.
+  - `proxy_profiles` table with protocol kind, host, port, credentials reference, and DNS policy.
+  - `download_events` and `application_settings` tables for audit and state persistence.
+- **Integration Test Suite (`nexus-tests`):**
+  - `crash_persistence_test.rs`: Validates restart durability, physical file reopen, and crash recovery resetting in-flight downloads to `Paused`.
+  - `storage_migration_test.rs`: Validates migration execution, filtering by status, and transactional consistency.
+  - `security_guards_test.rs`: Validates SSRF blocking, filename path traversal prevention, and SHA-256/BLAKE3 hashing.
+
+## [0.1.0] - Phase 0: Project Foundation
 
 ### Added
 - **Repository & Workspace Setup:** Initialized 19-crate Rust modular monolithic workspace with resolver 2 and shared workspace dependencies.

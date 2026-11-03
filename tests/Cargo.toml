@@ -1,0 +1,37 @@
+[package]
+name = "nexus-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[[test]]
+name = "crash_persistence"
+path = "recovery/crash_persistence_test.rs"
+
+[[test]]
+name = "storage_migration"
+path = "integration/storage_migration_test.rs"
+
+[[test]]
+name = "security_guards"
+path = "security/security_guards_test.rs"
+
+[dependencies]
+nexus-core = { workspace = true }
+nexus-domain = { workspace = true }
+nexus-download = { workspace = true }
+nexus-segments = { workspace = true }
+nexus-storage = { workspace = true }
+nexus-recovery = { workspace = true }
+nexus-application = { workspace = true }
+nexus-network = { workspace = true }
+nexus-network-platform = { workspace = true }
+nexus-proxy = { workspace = true }
+nexus-events = { workspace = true }
+nexus-security = { workspace = true }
+nexus-integrity = { workspace = true }
+tokio = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true }

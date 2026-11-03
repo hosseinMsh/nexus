@@ -10,6 +10,7 @@ Cargo.lock
 
 # Editor directories and files
 .idea/
+.openidea/
 .vscode/
 *.sublime-project
 *.sublime-workspace
