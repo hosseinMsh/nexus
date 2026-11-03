@@ -7,7 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] - Phase 2: HTTP Download Engine
+## [Unreleased] - Phase 3: Multi-Connection Engine
+
+### Added
+- **Asynchronous Disk Writer Actor (`nexus-download::writer`):**
+  - Implemented `AsyncFileWriterHandle` and background `spawn_disk_writer` actor with bounded Tokio `mpsc` queue backpressure.
+  - Safe, lock-free, single-handle file write coordination with random-access seek-and-write for concurrent workers.
+  - Asynchronous flush and sync guarantees (`WriterCommand::Sync`, `WriterCommand::Close`).
+  - Thread-safe error propagation for disk I/O faults.
+- **Parallel Multi-Connection Worker Pool (`nexus-download::worker`):**
+  - Implemented `WorkerPool` with Tokio `JoinSet` managing up to 32 parallel worker streams.
+  - Designed `AtomicSegment` with lock-free atomic offsets (`Arc<AtomicU64>`), byte progress, and status flags.
+  - Dynamic end-of-transfer "work stealing": idle fast workers inspect active in-progress segments with $\ge 128\text{ KB}$ remaining, dynamically split the uncommitted range, and download the tail concurrently.
+  - Exponential backoff retry logic on network drops, with immediate checkpoint resumption avoiding duplicate range transfers.
+  - Integrated `validate_segments` ensuring strict absence of byte gaps or overlapping intervals.
+- **Integration & Performance Test Suites (`nexus-tests`):**
+  - `multi_connection_engine_test.rs`: 5 integration tests verifying:
+    - 16-worker parallel downloads with SHA-256 integrity verification.
+    - Strict coverage validation (`validate_segments`) with arbitrary non-power-of-two file sizes.
+    - Dynamic work stealing across asymmetric / stalled connections.
+    - Mid-stream network connection drop recovery from checkpoint.
+    - Server connection concurrency limits and HTTP 429 backoff.
+  - `multi_connection_benchmark_test.rs`: Performance benchmark against throttled mock HTTP server:
+    - Single-connection vs 4-connection transfer benchmark showing **3.42x speedup** on throttled channels.
+
+## [0.3.0] - Phase 2: HTTP Download Engine
 
 ### Added
 - **HTTP Transport Engine (`nexus-transport`):**

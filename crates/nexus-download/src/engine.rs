@@ -2,24 +2,24 @@
 
 use chrono::Utc;
 use nexus_core::ByteSize;
-use nexus_domain::{
-    DownloadSegment, DownloadStatus, DownloadTask, NetworkPath, SegmentId, SegmentStatus, TaskId,
-};
+use nexus_domain::{DownloadStatus, DownloadTask, NetworkPath, SegmentId, TaskId};
 use nexus_events::{EventBus, SystemEvent};
 use nexus_segments::partition_segments;
 use nexus_storage::{SegmentRepository, StorageError, TaskRepository};
 use nexus_transport::{RemoteMetadata, TransportClient, TransportError};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info};
 
 use crate::file::{
     final_file_path, open_or_create_part_file, part_file_path, promote_part_file, sync_file,
     write_at_offset, FileError,
 };
+use crate::worker::WorkerPool;
+use crate::writer::spawn_disk_writer;
 use crate::DownloadStateMachine;
 
 #[derive(Error, Debug)]
@@ -129,36 +129,79 @@ impl DownloadEngine {
             let total_bytes = task.total_size.unwrap().bytes();
             let mut segments = self.segment_repo.get_segments_for_task(&task.id).await?;
 
+            let connection_count = task.policy.max_connections.clamp(1, 16) as usize;
             if segments.is_empty() {
-                let count = task.policy.max_connections.clamp(1, 16) as usize;
-                segments = partition_segments(task.id, total_bytes, count)
+                segments = partition_segments(task.id, total_bytes, connection_count)
                     .map_err(|e| EngineError::Storage(StorageError::Database(e.to_string())))?;
                 self.segment_repo.save_segments(&segments).await?;
             }
 
-            // Download segments
-            self.download_segments(&mut task, &mut segments, &mut file, path, &cancel_token)
-                .await?;
+            let (writer_handle, writer_task) = spawn_disk_writer(file, 128);
+            let total_downloaded = Arc::new(AtomicU64::new(task.downloaded_size.bytes()));
+
+            let pool = WorkerPool::new(
+                task.id,
+                task.url.clone(),
+                total_bytes,
+                task.policy.retry_limit,
+                connection_count,
+                writer_handle.clone(),
+                Arc::clone(&self.transport),
+                Arc::clone(&self.segment_repo),
+                Arc::clone(&self.event_bus),
+                cancel_token.clone(),
+            );
+
+            let pool_result = pool
+                .execute(segments, path, Arc::clone(&total_downloaded))
+                .await;
+
+            // Close writer to flush all buffered chunks
+            let close_res = writer_handle.close().await;
+            let _ = writer_task.await;
+
+            let downloaded_so_far = total_downloaded.load(Ordering::Relaxed);
+            task.downloaded_size = ByteSize(downloaded_so_far.min(total_bytes));
+            self.task_repo.save_task(&task).await?;
+
+            if cancel_token.is_cancelled()
+                || matches!(pool_result, Err(EngineError::CancelledOrPaused))
+            {
+                DownloadStateMachine::transition(&mut task, DownloadStatus::Paused)
+                    .map_err(|e| EngineError::Storage(StorageError::Database(e.to_string())))?;
+                self.task_repo.save_task(&task).await?;
+                info!(task_id = %task.id, "Multi-connection download safely paused and flushed");
+                return Err(EngineError::CancelledOrPaused);
+            }
+
+            if let Err(e) = close_res {
+                return Err(EngineError::File(FileError::Io(match e {
+                    crate::writer::WriterError::Io(err) => err,
+                    crate::writer::WriterError::ChannelClosed => {
+                        std::io::Error::other("Writer channel closed")
+                    }
+                })));
+            }
+
+            pool_result?;
         } else {
             // Non-range / unknown size streaming fallback
             info!(task_id = %task.id, "Server does not support Range; falling back to single stream");
             self.download_single_stream(&mut task, &mut file, path, &cancel_token)
                 .await?;
-        }
 
-        // Check if paused during download
-        if cancel_token.is_cancelled() {
+            if cancel_token.is_cancelled() {
+                sync_file(&mut file).await.map_err(FileError::Io)?;
+                DownloadStateMachine::transition(&mut task, DownloadStatus::Paused)
+                    .map_err(|e| EngineError::Storage(StorageError::Database(e.to_string())))?;
+                self.task_repo.save_task(&task).await?;
+                info!(task_id = %task.id, "Download safely paused and flushed");
+                return Err(EngineError::CancelledOrPaused);
+            }
+
             sync_file(&mut file).await.map_err(FileError::Io)?;
-            DownloadStateMachine::transition(&mut task, DownloadStatus::Paused)
-                .map_err(|e| EngineError::Storage(StorageError::Database(e.to_string())))?;
-            self.task_repo.save_task(&task).await?;
-            info!(task_id = %task.id, "Download safely paused and flushed");
-            return Err(EngineError::CancelledOrPaused);
+            drop(file);
         }
-
-        // Step 4: Finalize file and promote
-        sync_file(&mut file).await.map_err(FileError::Io)?;
-        drop(file);
 
         // Step 5: Transition to Verifying
         DownloadStateMachine::transition(&mut task, DownloadStatus::Verifying)
@@ -208,151 +251,6 @@ impl DownloadEngine {
         task.updated_at = Utc::now();
         self.task_repo.save_task(task).await?;
         Ok(())
-    }
-
-    async fn download_segments(
-        &self,
-        task: &mut DownloadTask,
-        segments: &mut [DownloadSegment],
-        file: &mut tokio::fs::File,
-        path: &NetworkPath,
-        cancel_token: &CancellationToken,
-    ) -> Result<(), EngineError> {
-        for seg in segments.iter_mut() {
-            if seg.status == SegmentStatus::Completed {
-                continue;
-            }
-
-            if cancel_token.is_cancelled() {
-                return Ok(());
-            }
-
-            self.download_single_segment(task, seg, file, path, cancel_token)
-                .await?;
-        }
-
-        Ok(())
-    }
-
-    async fn download_single_segment(
-        &self,
-        task: &mut DownloadTask,
-        seg: &mut DownloadSegment,
-        file: &mut tokio::fs::File,
-        path: &NetworkPath,
-        cancel_token: &CancellationToken,
-    ) -> Result<(), EngineError> {
-        let mut retries = 0;
-        let max_retries = task.policy.retry_limit;
-
-        while retries <= max_retries {
-            if cancel_token.is_cancelled() {
-                return Ok(());
-            }
-
-            let start = seg.start_offset + seg.downloaded_bytes;
-            let end = seg.end_offset;
-
-            if start > end {
-                seg.status = SegmentStatus::Completed;
-                self.segment_repo
-                    .save_segments(std::slice::from_ref(seg))
-                    .await?;
-                return Ok(());
-            }
-
-            debug!(
-                segment_id = %seg.id,
-                start = start,
-                end = end,
-                attempt = retries + 1,
-                "Requesting segment range"
-            );
-
-            match self
-                .transport
-                .fetch_range(path, &task.url, start, end)
-                .await
-            {
-                Ok(mut stream) => {
-                    seg.status = SegmentStatus::InProgress;
-                    let _ = self
-                        .segment_repo
-                        .save_segments(std::slice::from_ref(seg))
-                        .await;
-                    let mut buffer = [0u8; 64 * 1024]; // 64 KB buffer
-
-                    let mut stream_failed = false;
-
-                    loop {
-                        if cancel_token.is_cancelled() {
-                            return Ok(());
-                        }
-
-                        match stream.read(&mut buffer).await {
-                            Ok(0) => break, // EOF for this range
-                            Ok(n) => {
-                                let write_offset = seg.start_offset + seg.downloaded_bytes;
-                                if let Err(e) =
-                                    write_at_offset(file, write_offset, &buffer[..n]).await
-                                {
-                                    error!(error = %e, "Disk write error");
-                                    return Err(EngineError::File(FileError::Io(e)));
-                                }
-
-                                seg.downloaded_bytes += n as u64;
-                                task.downloaded_size =
-                                    ByteSize(task.downloaded_size.bytes() + n as u64);
-
-                                // Checkpoint segment progress
-                                let _ = self
-                                    .segment_repo
-                                    .update_segment_progress(&seg.id, seg.downloaded_bytes)
-                                    .await;
-
-                                self.event_bus.publish(SystemEvent::SegmentProgress {
-                                    task_id: task.id,
-                                    segment_id: seg.id,
-                                    downloaded_bytes: seg.downloaded_bytes,
-                                    total_bytes: seg.total_bytes(),
-                                    timestamp: Utc::now(),
-                                });
-                            }
-                            Err(e) => {
-                                warn!(error = %e, "Stream read error; triggering retry");
-                                stream_failed = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    if !stream_failed && seg.remaining_bytes() == 0 {
-                        seg.status = SegmentStatus::Completed;
-                        self.segment_repo
-                            .save_segments(std::slice::from_ref(seg))
-                            .await?;
-                        self.task_repo.save_task(task).await?;
-                        return Ok(());
-                    }
-                }
-                Err(e) => {
-                    warn!(error = ?e, attempt = retries + 1, "Transport fetch range error");
-                }
-            }
-
-            retries += 1;
-            seg.retry_count = retries;
-            if retries <= max_retries {
-                let backoff_ms = 50 * (1 << retries.min(6));
-                tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
-            }
-        }
-
-        seg.status = SegmentStatus::Failed;
-        Err(EngineError::MaxRetriesExceeded {
-            segment_id: seg.id,
-            retries: max_retries,
-        })
     }
 
     async fn download_single_stream(

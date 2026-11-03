@@ -22,6 +22,14 @@ path = "security/security_guards_test.rs"
 name = "http_download_engine"
 path = "integration/http_download_engine_test.rs"
 
+[[test]]
+name = "multi_connection_engine"
+path = "integration/multi_connection_engine_test.rs"
+
+[[test]]
+name = "multi_connection_benchmark"
+path = "performance/multi_connection_benchmark_test.rs"
+
 [dependencies]
 nexus-core = { workspace = true }
 nexus-domain = { workspace = true }

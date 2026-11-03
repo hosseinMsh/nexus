@@ -14,6 +14,7 @@ nexus-transport = { workspace = true }
 nexus-events = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+bytes = { workspace = true }
 futures = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }

@@ -7,12 +7,16 @@ use tracing::{debug, info, warn};
 
 pub mod engine;
 pub mod file;
+pub mod worker;
+pub mod writer;
 
 pub use engine::{DownloadEngine, EngineError};
 pub use file::{
     final_file_path, open_or_create_part_file, part_file_path, promote_part_file, sync_file,
     write_at_offset, FileError,
 };
+pub use worker::WorkerPool;
+pub use writer::{spawn_disk_writer, AsyncFileWriterHandle, WriterError};
 
 #[derive(Error, Debug, PartialEq, Eq)]
 pub enum DownloadStateError {
