@@ -7,7 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] - Phase 1: Domain and Storage Persistence
+## [Unreleased] - Phase 2: HTTP Download Engine
+
+### Added
+- **HTTP Transport Engine (`nexus-transport`):**
+  - Implemented `HttpTransportClient` wrapping `reqwest` with `rustls` TLS backend.
+  - Implemented `probe_metadata` with standard `HEAD` request and robust fallback to `GET` with `Range: bytes=0-0` when servers return `405 Method Not Allowed` or `501 Not Implemented`.
+  - Extracted headers for `Content-Length`, `Accept-Ranges`, `Content-Range`, `ETag`, `Last-Modified`, and RFC 5987 / standard `Content-Disposition` filename parsing.
+  - Redirect tracking to capture and store the final CDN or target URL.
+  - Implemented `fetch_range` returning an async streaming reader with streaming byte chunks.
+- **Temporary File Manager (`nexus-download::file`):**
+  - Deterministic `.part` file naming schema (`<dir>/<filename>.<task_id>.part`).
+  - Sparse file pre-allocation via `file.set_len(size)`.
+  - Concurrency-safe random-access writes using `tokio::fs::File` with `AsyncSeekExt::seek` and `AsyncWriteExt::write_all`.
+  - Buffer synchronization via `file.sync_all()`.
+  - Atomic file promotion from `.part` to final filename via `tokio::fs::rename`, with overwrite protection and parent directory auto-creation.
+- **Download Execution Engine (`nexus-download::engine`):**
+  - Comprehensive lifecycle coordinator managing transitions: `Queued -> Preparing -> Downloading -> Verifying -> Completed`.
+  - HTTP Range segment partitioning via `nexus-segments::partition_segments`.
+  - Real-time progress tracking, checkpointing segment completion, and publishing `SystemEvent::SegmentProgress`.
+  - Graceful cancellation and pause handling via `tokio_util::sync::CancellationToken` saving partial bytes and transitioning to `DownloadStatus::Paused`.
+  - Fallback streaming mechanism for non-Range servers or streams with unknown total file sizes.
+  - Automatic retry with exponential backoff on transient transport errors.
+- **Integration Test Suite (`nexus-tests`):**
+  - `http_download_engine_test.rs`: 5 integration tests using hermetic local TCP HTTP mock servers:
+    - `test_range_capable_download_and_file_assembly`: Multi-segment download, sparse file assembly, and byte-for-byte verification.
+    - `test_head_rejection_probe_fallback`: Verifies range probe fallback when server rejects `HEAD` with HTTP 405.
+    - `test_pause_and_resume_download_lifecycle`: Verifies pausing at mid-transfer, flushes to disk, and resumes to completion without re-downloading finished segments.
+    - `test_non_range_server_fallback`: Verifies graceful single-stream fallback when `Accept-Ranges` is omitted or absent.
+    - `test_redirect_handling`: Verifies 302 redirect following and metadata preservation.
+
+## [0.2.0] - Phase 1: Domain and Storage Persistence
 
 ### Added
 - **SQLite Storage Engine (`nexus-storage`):**

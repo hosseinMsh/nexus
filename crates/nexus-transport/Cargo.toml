@@ -10,8 +10,12 @@ nexus-core = { workspace = true }
 nexus-domain = { workspace = true }
 nexus-network = { workspace = true }
 nexus-proxy = { workspace = true }
+reqwest = { workspace = true }
+bytes = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+futures = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
-tokio = { workspace = true }
 url = { workspace = true }
 tracing = { workspace = true }

@@ -7,6 +7,9 @@ use std::time::Duration;
 use thiserror::Error;
 use url::Url;
 
+pub mod http;
+pub use http::{HttpError, HttpTransportClient, StreamAsyncReader};
+
 #[derive(Error, Debug)]
 pub enum TransportError {
     #[error("Connection timeout after {0:?}")]

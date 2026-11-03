@@ -5,6 +5,15 @@ use nexus_domain::{DownloadStatus, DownloadTask};
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
+pub mod engine;
+pub mod file;
+
+pub use engine::{DownloadEngine, EngineError};
+pub use file::{
+    final_file_path, open_or_create_part_file, part_file_path, promote_part_file, sync_file,
+    write_at_offset, FileError,
+};
+
 #[derive(Error, Debug, PartialEq, Eq)]
 pub enum DownloadStateError {
     #[error("Illegal state transition from {from} to {to}")]
@@ -37,14 +46,18 @@ impl DownloadStateMachine {
         match (current, target) {
             // Initial transitions
             (Created, Queued) => true,
+            (Created, Preparing) => true,
+            (Created, Paused) => true,
             (Created, Cancelled) => true,
 
             // Queued
             (Queued, Preparing) => true,
+            (Queued, Paused) => true,
             (Queued, Cancelled) => true,
 
             // Preparing
             (Preparing, Downloading) => true,
+            (Preparing, Paused) => true,
             (Preparing, Failed) => true,
             (Preparing, Cancelled) => true,
 
@@ -52,6 +65,7 @@ impl DownloadStateMachine {
             (Downloading, Paused) => true,
             (Downloading, Recovering) => true,
             (Downloading, Verifying) => true,
+            (Downloading, Completed) => true,
             (Downloading, Failed) => true,
             (Downloading, Cancelled) => true,
 
