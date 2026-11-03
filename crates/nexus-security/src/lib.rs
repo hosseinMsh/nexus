@@ -1,5 +1,9 @@
 //! Security guards: SSRF validation, path traversal prevention, and filename sanitization.
 
+pub mod credentials;
+
+pub use credentials::{CredentialError, CredentialStore, InMemoryCredentialStore};
+
 use std::net::IpAddr;
 use std::path::{Component, Path};
 use thiserror::Error;

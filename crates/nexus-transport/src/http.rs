@@ -2,16 +2,21 @@
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use nexus_domain::NetworkPath;
+use nexus_domain::{NetworkPath, ProxyId};
+use nexus_proxy::{format_authenticated_proxy_url, ProxyManager};
+use nexus_security::CredentialStore;
 use reqwest::header::{
     ACCEPT_RANGES, CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_RANGE, ETAG, LAST_MODIFIED, RANGE,
 };
 use reqwest::{Client, Response, StatusCode};
+use std::collections::HashMap;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::io::{AsyncRead, ReadBuf};
+use tokio::sync::RwLock;
 use tracing::{debug, warn};
 use url::Url;
 
@@ -47,15 +52,69 @@ impl From<HttpError> for TransportError {
     }
 }
 
-/// Production HTTP/HTTPS transport client.
-#[derive(Clone, Debug)]
+/// Production HTTP/HTTPS transport client with per-path proxy routing.
+#[derive(Clone)]
 pub struct HttpTransportClient {
-    client: Client,
+    default_client: Client,
+    options: ConnectionOptions,
+    proxy_manager: Option<Arc<ProxyManager>>,
+    credential_store: Option<Arc<dyn CredentialStore>>,
+    proxy_clients: Arc<RwLock<HashMap<ProxyId, Client>>>,
+}
+
+impl std::fmt::Debug for HttpTransportClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpTransportClient")
+            .field("options", &self.options)
+            .finish()
+    }
 }
 
 impl HttpTransportClient {
     /// Creates a new HTTP transport client with the specified connection options.
     pub fn new(options: &ConnectionOptions) -> Result<Self, TransportError> {
+        let client = Self::build_reqwest_client(options, None)?;
+        Ok(Self {
+            default_client: client,
+            options: options.clone(),
+            proxy_manager: None,
+            credential_store: None,
+            proxy_clients: Arc::new(RwLock::new(HashMap::new())),
+        })
+    }
+
+    /// Creates an HTTP transport client integrated with a ProxyManager and optional CredentialStore.
+    pub fn with_proxy_manager(
+        options: &ConnectionOptions,
+        proxy_manager: Arc<ProxyManager>,
+        credential_store: Option<Arc<dyn CredentialStore>>,
+    ) -> Result<Self, TransportError> {
+        let client = Self::build_reqwest_client(options, None)?;
+        Ok(Self {
+            default_client: client,
+            options: options.clone(),
+            proxy_manager: Some(proxy_manager),
+            credential_store,
+            proxy_clients: Arc::new(RwLock::new(HashMap::new())),
+        })
+    }
+
+    /// Fluent builder method to attach proxy manager and optional credential store.
+    #[must_use]
+    pub fn with_proxy_config(
+        mut self,
+        proxy_manager: Arc<ProxyManager>,
+        credential_store: Option<Arc<dyn CredentialStore>>,
+    ) -> Self {
+        self.proxy_manager = Some(proxy_manager);
+        self.credential_store = credential_store;
+        self
+    }
+
+    fn build_reqwest_client(
+        options: &ConnectionOptions,
+        proxy: Option<reqwest::Proxy>,
+    ) -> Result<Client, TransportError> {
         let mut builder = Client::builder()
             .connect_timeout(options.connect_timeout)
             .timeout(options.read_timeout)
@@ -66,11 +125,73 @@ impl HttpTransportClient {
             builder = builder.local_address(local_addr.ip());
         }
 
-        let client = builder
-            .build()
-            .map_err(|e| TransportError::Protocol(format!("Failed to build HTTP client: {e}")))?;
+        if let Some(p) = proxy {
+            builder = builder.proxy(p);
+        }
 
-        Ok(Self { client })
+        builder
+            .build()
+            .map_err(|e| TransportError::Protocol(format!("Failed to build HTTP client: {e}")))
+    }
+
+    /// Resolves the dedicated HTTP client configured for the specific NetworkPath.
+    ///
+    /// Guarantees that if a path specifies a proxy, traffic strictly flows through that proxy.
+    async fn get_client_for_path(&self, path: &NetworkPath) -> Result<Client, TransportError> {
+        let proxy_id = match path.proxy_id {
+            Some(ref id) => id,
+            None => return Ok(self.default_client.clone()),
+        };
+
+        // Check cached client for this ProxyId
+        {
+            let cache = self.proxy_clients.read().await;
+            if let Some(client) = cache.get(proxy_id) {
+                return Ok(client.clone());
+            }
+        }
+
+        let mgr = self.proxy_manager.as_ref().ok_or_else(|| {
+            TransportError::Protocol(format!(
+                "NetworkPath specifies proxy '{proxy_id}', but no ProxyManager is configured"
+            ))
+        })?;
+
+        let profile = mgr.get_profile(proxy_id).await.ok_or_else(|| {
+            TransportError::Protocol(format!("Configured proxy '{proxy_id}' not found"))
+        })?;
+
+        if !profile.enabled {
+            return Err(TransportError::Protocol(format!(
+                "Configured proxy '{}' is disabled",
+                profile.name
+            )));
+        }
+
+        let creds = if let (Some(ref cred_store), Some(ref cred_ref)) =
+            (&self.credential_store, &profile.credential_reference)
+        {
+            cred_store.get_credential(cred_ref).await.map_err(|e| {
+                TransportError::Protocol(format!("Failed to retrieve proxy credentials: {e}"))
+            })?
+        } else {
+            None
+        };
+
+        let cred_tuple = creds.as_ref().map(|(u, p)| (u.as_str(), p.as_str()));
+        let proxy_url_str = format_authenticated_proxy_url(&profile, cred_tuple)
+            .map_err(|e| TransportError::Protocol(format!("Failed to format proxy URL: {e}")))?;
+
+        let reqwest_proxy = reqwest::Proxy::all(&proxy_url_str).map_err(|e| {
+            TransportError::Protocol(format!("Invalid proxy URL '{proxy_url_str}': {e}"))
+        })?;
+
+        let proxied_client = Self::build_reqwest_client(&self.options, Some(reqwest_proxy))?;
+
+        let mut cache = self.proxy_clients.write().await;
+        cache.insert(*proxy_id, proxied_client.clone());
+
+        Ok(proxied_client)
     }
 
     /// Helper to parse filename from Content-Disposition header.
@@ -138,13 +259,14 @@ impl Default for HttpTransportClient {
 impl TransportClient for HttpTransportClient {
     async fn probe_metadata(
         &self,
-        _path: &NetworkPath,
+        path: &NetworkPath,
         url: &Url,
     ) -> Result<RemoteMetadata, TransportError> {
-        debug!(url = %url, "Probing remote resource metadata via HEAD");
+        let client = self.get_client_for_path(path).await?;
+        debug!(url = %url, path_id = %path.id, "Probing remote resource metadata via HEAD");
 
         // Attempt 1: Standard HEAD request
-        let head_res = self.client.head(url.as_str()).send().await;
+        let head_res = client.head(url.as_str()).send().await;
 
         let res = match head_res {
             Ok(r) if r.status().is_success() => r,
@@ -154,7 +276,7 @@ impl TransportClient for HttpTransportClient {
             {
                 debug!(status = %r.status(), "HEAD not allowed by remote server; falling back to Range GET probe");
                 // Attempt 2: GET with Range: bytes=0-0 probe
-                self.client
+                client
                     .get(url.as_str())
                     .header(RANGE, "bytes=0-0")
                     .send()
@@ -163,7 +285,7 @@ impl TransportClient for HttpTransportClient {
             }
             Ok(r) => {
                 warn!(status = %r.status(), "HEAD returned non-success; attempting GET range probe fallback");
-                self.client
+                client
                     .get(url.as_str())
                     .header(RANGE, "bytes=0-0")
                     .send()
@@ -174,7 +296,7 @@ impl TransportClient for HttpTransportClient {
             }
             Err(e) => {
                 warn!(error = %e, "HEAD request error; attempting GET range probe fallback");
-                self.client
+                client
                     .get(url.as_str())
                     .header(RANGE, "bytes=0-0")
                     .send()
@@ -253,16 +375,16 @@ impl TransportClient for HttpTransportClient {
 
     async fn fetch_range(
         &self,
-        _path: &NetworkPath,
+        path: &NetworkPath,
         url: &Url,
         start_offset: u64,
         end_offset: u64,
     ) -> Result<Box<dyn AsyncRead + Unpin + Send>, TransportError> {
+        let client = self.get_client_for_path(path).await?;
         let range_header = format!("bytes={start_offset}-{end_offset}");
-        debug!(url = %url, range = %range_header, "Executing HTTP range request");
+        debug!(url = %url, path_id = %path.id, range = %range_header, "Executing HTTP range request");
 
-        let response = self
-            .client
+        let response = client
             .get(url.as_str())
             .header(RANGE, range_header)
             .send()

@@ -7,7 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] - Phase 4: Network Discovery
+## [Unreleased] - Phase 6: Multi-Path Networking
+
+## [0.6.0] - Phase 5: Proxy Engine
+
+### Added
+- **Proxy Profile Coordinator (`nexus-proxy`):**
+  - Implemented `ProxyManager` registering, updating, listing, and health-checking `ProxyProfile` entities.
+  - SOCKS5 (RFC 1928) handshake and RFC 1929 username/password authentication client negotiation.
+  - Remote vs Local DNS policy resolution: configured `socks5h://` schemes instructing client transports to resolve destination domains remotely via ATYP `0x03`.
+  - Active latency and status health probing (`check_proxy_health`) reporting alive status, round-trip latency, and detailed failure diagnostics.
+- **Secure Keyring & Credential Separation (`nexus-security`):**
+  - Implemented `CredentialStore` trait and `InMemoryCredentialStore` (and OS keyring abstraction).
+  - Enforced zero-plaintext-credential storage in the primary database: domain profiles store only cryptographic references (`credential_reference: Option<String>`), never passwords or usernames.
+- **Per-Path Proxy Routing Transport (`nexus-transport`):**
+  - Updated `HttpTransportClient` to resolve and cache dedicated proxied client instances on a per-`NetworkPath` basis.
+  - Strict isolation guarantee: if a path specifies a proxy, traffic must strictly flow through that proxy; on connection failure or bad auth, the transport immediately errors with `TransportError` and **never** falls back silently to direct connections.
+  - Independent per-path isolation: traffic on unproxied paths flows directly without impacting proxied paths.
+- **Integration Test Suite (`nexus-tests`):**
+  - `proxy_engine_test.rs`: 7 integration tests covering:
+    - SOCKS5 authenticated downloads with RFC 1928 / RFC 1929 handshake and file integrity verification.
+    - HTTP proxying with partial content `Range` request forwarding.
+    - Remote DNS resolution (`socks5h://`, ATYP 0x03 domain forwarding).
+    - Independent per-path proxy routing (proxied vs direct).
+    - Strict isolation: zero fallback to direct unproxied connections on proxy failure.
+    - Secure credential separation at rest (zero plaintext passwords in database serialization).
+    - Live proxy health probing (healthy, bad auth, closed port).
+
+## [0.5.0] - Phase 4: Network Discovery
 
 ### Added
 - **OS Platform Adapters (`nexus-network-platform`):**

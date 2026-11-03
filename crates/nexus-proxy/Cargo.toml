@@ -8,6 +8,7 @@ authors.workspace = true
 [dependencies]
 nexus-core = { workspace = true }
 nexus-domain = { workspace = true }
+nexus-security = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 tokio = { workspace = true }

@@ -10,6 +10,7 @@ nexus-core = { workspace = true }
 nexus-domain = { workspace = true }
 nexus-network = { workspace = true }
 nexus-proxy = { workspace = true }
+nexus-security = { workspace = true }
 reqwest = { workspace = true }
 bytes = { workspace = true }
 tokio = { workspace = true }

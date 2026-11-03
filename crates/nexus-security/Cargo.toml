@@ -9,5 +9,7 @@ authors.workspace = true
 nexus-core = { workspace = true }
 nexus-domain = { workspace = true }
 thiserror = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
 url = { workspace = true }
 tracing = { workspace = true }
