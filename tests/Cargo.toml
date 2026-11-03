@@ -38,6 +38,10 @@ path = "network/network_discovery_test.rs"
 name = "proxy_engine"
 path = "integration/proxy_engine_test.rs"
 
+[[test]]
+name = "multi_path_networking"
+path = "integration/multi_path_networking_test.rs"
+
 [dependencies]
 nexus-core = { workspace = true }
 nexus-domain = { workspace = true }
@@ -49,6 +53,7 @@ nexus-application = { workspace = true }
 nexus-network = { workspace = true }
 nexus-network-platform = { workspace = true }
 nexus-proxy = { workspace = true }
+nexus-path-scheduler = { workspace = true }
 nexus-transport = { workspace = true }
 nexus-events = { workspace = true }
 nexus-security = { workspace = true }

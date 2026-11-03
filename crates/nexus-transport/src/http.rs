@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use nexus_domain::{NetworkPath, ProxyId};
+use nexus_domain::{InterfaceId, NetworkPath, PathId};
 use nexus_proxy::{format_authenticated_proxy_url, ProxyManager};
 use nexus_security::CredentialStore;
 use reqwest::header::{
@@ -52,14 +52,15 @@ impl From<HttpError> for TransportError {
     }
 }
 
-/// Production HTTP/HTTPS transport client with per-path proxy routing.
+/// Production HTTP/HTTPS transport client with per-path proxy routing and interface IP binding.
 #[derive(Clone)]
 pub struct HttpTransportClient {
     default_client: Client,
     options: ConnectionOptions,
     proxy_manager: Option<Arc<ProxyManager>>,
     credential_store: Option<Arc<dyn CredentialStore>>,
-    proxy_clients: Arc<RwLock<HashMap<ProxyId, Client>>>,
+    path_clients: Arc<RwLock<HashMap<PathId, Client>>>,
+    interface_ips: Arc<RwLock<HashMap<InterfaceId, std::net::IpAddr>>>,
 }
 
 impl std::fmt::Debug for HttpTransportClient {
@@ -79,7 +80,8 @@ impl HttpTransportClient {
             options: options.clone(),
             proxy_manager: None,
             credential_store: None,
-            proxy_clients: Arc::new(RwLock::new(HashMap::new())),
+            path_clients: Arc::new(RwLock::new(HashMap::new())),
+            interface_ips: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
@@ -95,7 +97,8 @@ impl HttpTransportClient {
             options: options.clone(),
             proxy_manager: Some(proxy_manager),
             credential_store,
-            proxy_clients: Arc::new(RwLock::new(HashMap::new())),
+            path_clients: Arc::new(RwLock::new(HashMap::new())),
+            interface_ips: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
@@ -109,6 +112,12 @@ impl HttpTransportClient {
         self.proxy_manager = Some(proxy_manager);
         self.credential_store = credential_store;
         self
+    }
+
+    /// Registers a local IP address to bind sockets on a specific network interface.
+    pub async fn register_interface_ip(&self, interface_id: InterfaceId, ip: std::net::IpAddr) {
+        let mut ips = self.interface_ips.write().await;
+        ips.insert(interface_id, ip);
     }
 
     fn build_reqwest_client(
@@ -136,62 +145,78 @@ impl HttpTransportClient {
 
     /// Resolves the dedicated HTTP client configured for the specific NetworkPath.
     ///
-    /// Guarantees that if a path specifies a proxy, traffic strictly flows through that proxy.
+    /// Guarantees that if a path specifies a proxy or interface IP binding, traffic strictly adheres to that path.
     async fn get_client_for_path(&self, path: &NetworkPath) -> Result<Client, TransportError> {
-        let proxy_id = match path.proxy_id {
-            Some(ref id) => id,
-            None => return Ok(self.default_client.clone()),
-        };
-
-        // Check cached client for this ProxyId
+        // Check cached client for this PathId
         {
-            let cache = self.proxy_clients.read().await;
-            if let Some(client) = cache.get(proxy_id) {
+            let cache = self.path_clients.read().await;
+            if let Some(client) = cache.get(&path.id) {
                 return Ok(client.clone());
             }
         }
 
-        let mgr = self.proxy_manager.as_ref().ok_or_else(|| {
-            TransportError::Protocol(format!(
-                "NetworkPath specifies proxy '{proxy_id}', but no ProxyManager is configured"
-            ))
-        })?;
+        let local_ip = {
+            let ips = self.interface_ips.read().await;
+            ips.get(&path.interface_id).copied()
+        };
 
-        let profile = mgr.get_profile(proxy_id).await.ok_or_else(|| {
-            TransportError::Protocol(format!("Configured proxy '{proxy_id}' not found"))
-        })?;
-
-        if !profile.enabled {
-            return Err(TransportError::Protocol(format!(
-                "Configured proxy '{}' is disabled",
-                profile.name
-            )));
+        if path.proxy_id.is_none() && local_ip.is_none() {
+            return Ok(self.default_client.clone());
         }
 
-        let creds = if let (Some(ref cred_store), Some(ref cred_ref)) =
-            (&self.credential_store, &profile.credential_reference)
-        {
-            cred_store.get_credential(cred_ref).await.map_err(|e| {
-                TransportError::Protocol(format!("Failed to retrieve proxy credentials: {e}"))
-            })?
+        let reqwest_proxy = if let Some(ref proxy_id) = path.proxy_id {
+            let mgr = self.proxy_manager.as_ref().ok_or_else(|| {
+                TransportError::Protocol(format!(
+                    "NetworkPath specifies proxy '{proxy_id}', but no ProxyManager is configured"
+                ))
+            })?;
+
+            let profile = mgr.get_profile(proxy_id).await.ok_or_else(|| {
+                TransportError::Protocol(format!("Configured proxy '{proxy_id}' not found"))
+            })?;
+
+            if !profile.enabled {
+                return Err(TransportError::Protocol(format!(
+                    "Configured proxy '{}' is disabled",
+                    profile.name
+                )));
+            }
+
+            let creds = if let (Some(ref cred_store), Some(ref cred_ref)) =
+                (&self.credential_store, &profile.credential_reference)
+            {
+                cred_store.get_credential(cred_ref).await.map_err(|e| {
+                    TransportError::Protocol(format!("Failed to retrieve proxy credentials: {e}"))
+                })?
+            } else {
+                None
+            };
+
+            let cred_tuple = creds.as_ref().map(|(u, p)| (u.as_str(), p.as_str()));
+            let proxy_url_str =
+                format_authenticated_proxy_url(&profile, cred_tuple).map_err(|e| {
+                    TransportError::Protocol(format!("Failed to format proxy URL: {e}"))
+                })?;
+
+            let p = reqwest::Proxy::all(&proxy_url_str).map_err(|e| {
+                TransportError::Protocol(format!("Invalid proxy URL '{proxy_url_str}': {e}"))
+            })?;
+            Some(p)
         } else {
             None
         };
 
-        let cred_tuple = creds.as_ref().map(|(u, p)| (u.as_str(), p.as_str()));
-        let proxy_url_str = format_authenticated_proxy_url(&profile, cred_tuple)
-            .map_err(|e| TransportError::Protocol(format!("Failed to format proxy URL: {e}")))?;
+        let mut options = self.options.clone();
+        if let Some(ip) = local_ip {
+            options.bind_local_addr = Some(std::net::SocketAddr::new(ip, 0));
+        }
 
-        let reqwest_proxy = reqwest::Proxy::all(&proxy_url_str).map_err(|e| {
-            TransportError::Protocol(format!("Invalid proxy URL '{proxy_url_str}': {e}"))
-        })?;
+        let client = Self::build_reqwest_client(&options, reqwest_proxy)?;
 
-        let proxied_client = Self::build_reqwest_client(&self.options, Some(reqwest_proxy))?;
+        let mut cache = self.path_clients.write().await;
+        cache.insert(path.id, client.clone());
 
-        let mut cache = self.proxy_clients.write().await;
-        cache.insert(*proxy_id, proxied_client.clone());
-
-        Ok(proxied_client)
+        Ok(client)
     }
 
     /// Helper to parse filename from Content-Disposition header.

@@ -7,7 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] - Phase 6: Multi-Path Networking
+## [Unreleased] - Phase 7: Protocol Extensions
+
+## [0.7.0] - Phase 6: Multi-Path Networking
+
+### Added
+- **Multi-Path Transfer Engine & Worker Pool (`nexus-download`):**
+  - Extended `WorkerPool` to coordinate parallel transfers simultaneously across multiple independent `NetworkPath`s.
+  - Implemented dynamic path failover: when a path experiences connection drop, stream error, or proxy failure mid-transfer, workers dynamically detect the fault, record path degradation, and migrate in-flight segments to surviving healthy paths without aborting the overall transfer.
+  - Implemented `download_multi_path` in `DownloadEngine` with fallback single-path delegation (`download`).
+  - Strict absence of byte gaps or overlapping segment requests during multi-path execution.
+- **Dynamic Path Metrics & Adaptive Scheduling (`nexus-path-scheduler`):**
+  - Implemented `PathMetricsTracker` tracking real-time metrics per path:
+    - Exponential moving average (EMA) throughput calculation ($\alpha = 0.3$).
+    - Moving average round-trip latency ($\alpha = 0.2$).
+    - Consecutive failure counting and automatic health status transitioning (`is_healthy`).
+    - Active connection tracking with atomic increment/decrement.
+    - Aggregated throughput computation across all active paths (`aggregate_throughput_bps`).
+  - Implemented `select_best_candidate` and `select_alternative_path` in `AdaptivePathScheduler` taking into account path priority, throughput score, failure rate, and path connection limits (`PathLimits.max_connections`).
+- **Interface-Bound Socket Routing (`nexus-transport`):**
+  - Added interface IP registration (`register_interface_ip`) and socket binding (`builder.local_address`) per `InterfaceId`.
+  - Upgraded HTTP transport caching to `PathId` resolution, ensuring dedicated client isolation for distinct interface bindings and proxies.
+- **Integration Test Suite (`nexus-tests`):**
+  - `multi_path_networking_test.rs`: 5 integration tests covering:
+    - `test_multi_path_parallel_download_and_file_integrity`: Multi-path download across Direct and Proxied routes simultaneously with byte-for-byte SHA-256 integrity verification.
+    - `test_multi_path_failover_when_one_path_drops`: Mid-stream path drop recovery where surviving healthy paths seamlessly absorb uncommitted segments.
+    - `test_multi_path_priority_and_dynamic_scheduling`: Prioritization of high-priority paths with graceful fallback upon consecutive failures.
+    - `test_multi_path_connection_limits_enforced`: Connection limit enforcement diverting excess workers to secondary paths.
+    - `test_aggregate_throughput_accounting`: Accurate aggregate throughput tracking across active paths.
 
 ## [0.6.0] - Phase 5: Proxy Engine
 

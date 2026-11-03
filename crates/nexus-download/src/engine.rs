@@ -67,20 +67,44 @@ impl DownloadEngine {
         }
     }
 
-    /// Executes the full download lifecycle for a task.
+    /// Executes the full download lifecycle for a task across a single network path.
     pub async fn download(
         &self,
         task_id: &TaskId,
         path: &NetworkPath,
         cancel_token: CancellationToken,
     ) -> Result<(), EngineError> {
+        self.download_multi_path(task_id, std::slice::from_ref(path), cancel_token)
+            .await
+    }
+
+    /// Executes the full download lifecycle for a task across multiple network paths with dynamic load balancing and failover.
+    pub async fn download_multi_path(
+        &self,
+        task_id: &TaskId,
+        paths: &[NetworkPath],
+        cancel_token: CancellationToken,
+    ) -> Result<(), EngineError> {
+        if paths.is_empty() {
+            return Err(EngineError::Transport(TransportError::Protocol(
+                "No network paths provided for download".to_string(),
+            )));
+        }
+
+        let primary_path = &paths[0];
+
         let mut task = self
             .task_repo
             .get_task(task_id)
             .await?
             .ok_or_else(|| EngineError::TaskNotFound(task_id.to_string()))?;
 
-        info!(task_id = %task.id, url = %task.url, "Starting download execution");
+        info!(
+            task_id = %task.id,
+            url = %task.url,
+            num_paths = paths.len(),
+            "Starting multi-path download execution"
+        );
 
         if cancel_token.is_cancelled() {
             if task.status != DownloadStatus::Paused {
@@ -98,8 +122,11 @@ impl DownloadEngine {
             self.task_repo.save_task(&task).await?;
         }
 
-        // Step 2: Probe remote metadata
-        let metadata = self.transport.probe_metadata(path, &task.url).await?;
+        // Step 2: Probe remote metadata via primary path
+        let metadata = self
+            .transport
+            .probe_metadata(primary_path, &task.url)
+            .await?;
         self.apply_probed_metadata(&mut task, &metadata).await?;
 
         if cancel_token.is_cancelled() {
@@ -153,7 +180,7 @@ impl DownloadEngine {
             );
 
             let pool_result = pool
-                .execute(segments, path, Arc::clone(&total_downloaded))
+                .execute(segments, paths, Arc::clone(&total_downloaded))
                 .await;
 
             // Close writer to flush all buffered chunks
@@ -187,7 +214,7 @@ impl DownloadEngine {
         } else {
             // Non-range / unknown size streaming fallback
             info!(task_id = %task.id, "Server does not support Range; falling back to single stream");
-            self.download_single_stream(&mut task, &mut file, path, &cancel_token)
+            self.download_single_stream(&mut task, &mut file, primary_path, &cancel_token)
                 .await?;
 
             if cancel_token.is_cancelled() {

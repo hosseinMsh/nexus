@@ -5,6 +5,7 @@ use bytes::Bytes;
 use chrono::Utc;
 use nexus_domain::{DownloadSegment, NetworkPath, SegmentId, SegmentStatus, TaskId};
 use nexus_events::{EventBus, SystemEvent};
+use nexus_path_scheduler::{AdaptivePathScheduler, PathMetricsTracker};
 use nexus_segments::validate_segments;
 use nexus_storage::SegmentRepository;
 use nexus_transport::TransportClient;
@@ -81,7 +82,7 @@ impl AtomicSegment {
     }
 }
 
-/// Coordinator for parallel download workers across multiple connections.
+/// Coordinator for parallel download workers across multiple connections and network paths.
 pub struct WorkerPool {
     task_id: TaskId,
     task_url: url::Url,
@@ -93,6 +94,8 @@ pub struct WorkerPool {
     segment_repo: Arc<dyn SegmentRepository>,
     event_bus: Arc<EventBus>,
     cancel_token: CancellationToken,
+    scheduler: Arc<AdaptivePathScheduler>,
+    tracker: Arc<PathMetricsTracker>,
 }
 
 impl WorkerPool {
@@ -121,16 +124,47 @@ impl WorkerPool {
             segment_repo,
             event_bus,
             cancel_token,
+            scheduler: Arc::new(AdaptivePathScheduler::default()),
+            tracker: Arc::new(PathMetricsTracker::default()),
         }
     }
 
-    /// Executes parallel multi-connection downloading across the provided segments.
+    /// Configures a custom scheduler and metrics tracker.
+    #[must_use]
+    pub fn with_scheduler(
+        mut self,
+        scheduler: Arc<AdaptivePathScheduler>,
+        tracker: Arc<PathMetricsTracker>,
+    ) -> Self {
+        self.scheduler = scheduler;
+        self.tracker = tracker;
+        self
+    }
+
+    /// Returns a reference to the active path metrics tracker.
+    #[must_use]
+    pub fn tracker(&self) -> Arc<PathMetricsTracker> {
+        Arc::clone(&self.tracker)
+    }
+
+    /// Executes parallel multi-connection downloading across the provided segments and network paths.
     pub async fn execute(
         &self,
         initial_segments: Vec<DownloadSegment>,
-        path: &NetworkPath,
+        paths: &[NetworkPath],
         total_downloaded: Arc<AtomicU64>,
     ) -> Result<Vec<DownloadSegment>, EngineError> {
+        if paths.is_empty() {
+            return Err(EngineError::Transport(
+                nexus_transport::TransportError::Protocol("No network paths provided".to_string()),
+            ));
+        }
+
+        for path in paths {
+            self.tracker.register_path(path.id);
+        }
+
+        let paths_arc = Arc::new(paths.to_vec());
         let atomic_segments: Vec<AtomicSegment> = initial_segments
             .iter()
             .map(AtomicSegment::from_domain)
@@ -142,7 +176,8 @@ impl WorkerPool {
         debug!(
             task_id = %self.task_id,
             concurrency = num_workers,
-            "Spawning parallel download worker pool"
+            num_paths = paths.len(),
+            "Spawning parallel download worker pool across paths"
         );
 
         let mut join_set = tokio::task::JoinSet::new();
@@ -151,7 +186,10 @@ impl WorkerPool {
             let task_id = self.task_id;
             let task_url = self.task_url.clone();
             let retry_limit = self.retry_limit;
-            let path_clone = path.clone();
+            let initial_path = paths[worker_id % paths.len()].clone();
+            let all_paths = Arc::clone(&paths_arc);
+            let scheduler_clone = Arc::clone(&self.scheduler);
+            let tracker_clone = Arc::clone(&self.tracker);
             let segments_ref = Arc::clone(&segments_state);
             let notify_ref = Arc::clone(&notify);
             let writer_clone = self.writer.clone();
@@ -167,7 +205,10 @@ impl WorkerPool {
                     task_id,
                     task_url,
                     retry_limit,
-                    path_clone,
+                    initial_path,
+                    all_paths,
+                    scheduler_clone,
+                    tracker_clone,
                     segments_ref,
                     notify_ref,
                     writer_clone,
@@ -215,13 +256,31 @@ impl WorkerPool {
         Ok(final_segments)
     }
 
+    /// Single-path backward-compatibility execution helper.
+    pub async fn execute_single_path(
+        &self,
+        initial_segments: Vec<DownloadSegment>,
+        path: &NetworkPath,
+        total_downloaded: Arc<AtomicU64>,
+    ) -> Result<Vec<DownloadSegment>, EngineError> {
+        self.execute(
+            initial_segments,
+            std::slice::from_ref(path),
+            total_downloaded,
+        )
+        .await
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn run_worker(
         worker_id: usize,
         task_id: TaskId,
         task_url: url::Url,
         retry_limit: u32,
-        path: NetworkPath,
+        mut current_path: NetworkPath,
+        all_paths: Arc<Vec<NetworkPath>>,
+        scheduler: Arc<AdaptivePathScheduler>,
+        tracker: Arc<PathMetricsTracker>,
         segments_state: Arc<Mutex<Vec<AtomicSegment>>>,
         notify: Arc<Notify>,
         writer: AsyncFileWriterHandle,
@@ -328,7 +387,10 @@ impl WorkerPool {
                         task_id,
                         &task_url,
                         retry_limit,
-                        &path,
+                        &mut current_path,
+                        &all_paths,
+                        &scheduler,
+                        &tracker,
                         &seg,
                         &notify,
                         &writer,
@@ -370,7 +432,10 @@ impl WorkerPool {
         task_id: TaskId,
         task_url: &url::Url,
         retry_limit: u32,
-        path: &NetworkPath,
+        current_path: &mut NetworkPath,
+        all_paths: &[NetworkPath],
+        scheduler: &AdaptivePathScheduler,
+        tracker: &PathMetricsTracker,
         seg: &AtomicSegment,
         notify: &Arc<Notify>,
         writer: &AsyncFileWriterHandle,
@@ -400,8 +465,24 @@ impl WorkerPool {
                 return Ok(());
             }
 
+            // Ensure current path is healthy; if not, attempt failover
+            if !tracker.is_healthy(current_path.id) {
+                if let Ok(alt_path) =
+                    scheduler.select_alternative_path(all_paths, current_path.id, tracker)
+                {
+                    warn!(
+                        worker_id = worker_id,
+                        from = %current_path.id,
+                        to = %alt_path.id,
+                        "Pre-emptively failing over to healthy path"
+                    );
+                    *current_path = alt_path;
+                }
+            }
+
             debug!(
                 worker_id = worker_id,
+                path_id = %current_path.id,
                 segment_id = %seg.id,
                 start = start,
                 end = end,
@@ -409,13 +490,21 @@ impl WorkerPool {
                 "Worker fetching range"
             );
 
-            match transport.fetch_range(path, task_url, start, end).await {
+            tracker.inc_active_connections(current_path.id);
+            let start_fetch = std::time::Instant::now();
+
+            let fetch_res = transport
+                .fetch_range(current_path, task_url, start, end)
+                .await;
+
+            match fetch_res {
                 Ok(mut stream) => {
                     let mut buffer = [0u8; 64 * 1024]; // 64 KB buffer
                     let mut stream_failed = false;
 
                     loop {
                         if cancel_token.is_cancelled() {
+                            tracker.dec_active_connections(current_path.id);
                             return Ok(());
                         }
 
@@ -435,6 +524,7 @@ impl WorkerPool {
                             Ok(n) => {
                                 let chunk = Bytes::copy_from_slice(&buffer[..n]);
                                 if let Err(e) = writer.write(current_offset, chunk).await {
+                                    tracker.dec_active_connections(current_path.id);
                                     error!(error = %e, "Disk writer error in worker");
                                     return Err(EngineError::File(crate::file::FileError::Io(
                                         match e {
@@ -448,10 +538,13 @@ impl WorkerPool {
 
                                 seg.downloaded_bytes.fetch_add(n as u64, Ordering::Release);
                                 total_downloaded.fetch_add(n as u64, Ordering::Release);
+                                tracker.record_success(
+                                    current_path.id,
+                                    n as u64,
+                                    start_fetch.elapsed(),
+                                );
 
                                 let new_dl = seg.downloaded_bytes.load(Ordering::Acquire);
-
-                                // Checkpoint segment progress
                                 let _ = segment_repo.update_segment_progress(&seg.id, new_dl).await;
 
                                 let total_seg_bytes = seg
@@ -477,14 +570,18 @@ impl WorkerPool {
                             Err(e) => {
                                 warn!(
                                     worker_id = worker_id,
+                                    path_id = %current_path.id,
                                     error = %e,
-                                    "Stream read error in worker; triggering retry"
+                                    "Stream read error in worker; triggering failover / retry"
                                 );
                                 stream_failed = true;
+                                tracker.record_failure(current_path.id);
                                 break;
                             }
                         }
                     }
+
+                    tracker.dec_active_connections(current_path.id);
 
                     let final_dl = seg.downloaded_bytes.load(Ordering::Acquire);
                     let final_end = seg.end_offset.load(Ordering::Acquire);
@@ -500,14 +597,45 @@ impl WorkerPool {
                         notify.notify_waiters();
                         return Ok(());
                     }
+
+                    // If stream failed, attempt path failover before next retry
+                    if stream_failed {
+                        if let Ok(alt_path) =
+                            scheduler.select_alternative_path(all_paths, current_path.id, tracker)
+                        {
+                            warn!(
+                                worker_id = worker_id,
+                                from = %current_path.id,
+                                to = %alt_path.id,
+                                "Failover: stream failed, switching to healthy alternative path"
+                            );
+                            *current_path = alt_path;
+                        }
+                    }
                 }
                 Err(e) => {
+                    tracker.dec_active_connections(current_path.id);
+                    tracker.record_failure(current_path.id);
+
                     warn!(
                         worker_id = worker_id,
+                        path_id = %current_path.id,
                         error = ?e,
                         attempt = retries + 1,
-                        "Worker transport fetch range error"
+                        "Worker transport fetch range error; checking for path failover"
                     );
+
+                    if let Ok(alt_path) =
+                        scheduler.select_alternative_path(all_paths, current_path.id, tracker)
+                    {
+                        warn!(
+                            worker_id = worker_id,
+                            from = %current_path.id,
+                            to = %alt_path.id,
+                            "Failover: fetch failed, switching to healthy alternative path"
+                        );
+                        *current_path = alt_path;
+                    }
                 }
             }
 
